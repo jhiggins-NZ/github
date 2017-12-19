@@ -1,0 +1,51 @@
+- name: initialisation
+  hosts: iosv_switches
+  order: sorted
+  gather_facts: no
+  #connection: local
+  serial: 20  # Number of concurrent SSH sessions
+  strategy: linear
+  # Linear = wait for hosts, before running next task.
+  # Free = each host runs each task as fast as it can.
+
+  vars:
+    provider:
+      host: “{{ ansible_host }}”
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      transport: cli
+  tasks:
+    - block:
+      - debug: msg="Resetting Configuration Archive Log"
+      - name: Reset Configuration Archive Log
+        ios_command:
+          commands:
+            - configure replace nvram:startup-config force
+
+      - debug: msg="Initialsing"
+      - name: Initialisation
+        ios_config:
+          src: /etc/ansible/roles/cisco/ios/files/initialisation/initialisation.j2
+          provider: "{{ provider }}"
+        tags: initialisation
+        register: result.initialisation
+      - debug: msg="Configuration Complete"
+        when: result|succeeded
+      - debug: var=result.initialisation.stdout_lines
+        when: result|failed
+
+    - rescue:
+      - debug: msg="Error encountered"
+      - debug: msg="Rolling back to startup configuration"
+      - name: Configuration Replace
+        ios_command:
+          commands:
+            - configure replace nvram:startup-config force
+      - debug: var=result.initialisation.stdout_lines
+        when: result|failed
+
+    - always:
+      - name: Append Configuration Log
+        copy:
+          content: "{{ config.stdout[0] }}"
+          dest: "/etc/ansible/backup/results/cisco/ios/{{ inventory_hostname }}_{{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}_log.txt"
